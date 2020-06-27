@@ -1,7 +1,7 @@
 [package]
 name = "tinysearch"
 authors = ["Matthias Endler <matthias-endler@gmx.net>"]
-version = "0.4.0"
+version = "0.4.1"
 edition = "2018"
 description = "A tiny search engine for static websites"
 license = "Apache-2.0/MIT"
@@ -9,15 +9,15 @@ documentation = "https://github.com/mre/tinysearch/blob/master/README.md"
 homepage = "https://github.com/mre/tinysearch"
 
 [dependencies]
-structopt = "0.3.14"
+structopt = "0.3.15"
 tinysearch-shared = { path = "../shared", version = "0.2.1" }
 log = "0.4.8"
 serde_json = "1.0.55"
 tinysearch-cuckoofilter = "0.4.1"
 failure = "0.1.8"
 tempfile = "3.1.0"
-serde = "1.0.111"
-serde_derive = "1.0.111"
+serde = "1.0.112"
+serde_derive = "1.0.112"
 lazy_static = "1.4.0"
 pulldown-cmark = "0.7.1"
 phf = "0.7.21"
