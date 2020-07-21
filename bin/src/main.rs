@@ -8,14 +8,13 @@ mod index;
 mod storage;
 mod strip_markdown;
 
+use anyhow::{Context, Error, Result};
+use lazy_static::lazy_static;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::{env, fs};
-use structopt::StructOpt;
-
-use failure::{Error, ResultExt};
-use lazy_static::lazy_static;
+use argh::FromArgs;
 use tempfile::tempdir;
 
 use fs::File;
@@ -27,18 +26,19 @@ lazy_static! {
     static ref DEMO_HTML: &'static [u8] = include_bytes!("../assets/demo.html");
 }
 
-#[derive(StructOpt, Debug)]
+#[derive(FromArgs)]
+/// Tiny Search
 struct Opt {
     /// index JSON file to process
-    #[structopt(name = "index", parse(from_os_str))]
+    #[argh(positional)]
     index: PathBuf,
 
-    /// Output path for WASM module
-    #[structopt(short = "p", long = "path", parse(from_os_str), default_value = ".")]
-    out_path: PathBuf,
+    /// output path for WASM module
+    #[argh(option, short = 'p', long = "path")]
+    out_path: Option<PathBuf>,
 
-    /// Optimize the output using binaryen
-    #[structopt(short = "o", long = "optimize")]
+    /// optimize the output using binaryen
+    #[argh(switch, short = 'o', long = "optimize")]
     optimize: bool,
 }
 
@@ -64,8 +64,8 @@ fn extract_engine(temp_dir: &Path) -> Result<(), Error> {
 fn main() -> Result<(), Error> {
     FILES.set_passthrough(env::var_os("PASSTHROUGH").is_some());
 
-    let opt = Opt::from_args();
-    let out_path = opt.out_path.canonicalize()?;
+    let opt: Opt = argh::from_env();
+    let out_path = PathBuf::from(opt.out_path.unwrap_or(PathBuf::from("."))).canonicalize()?;
 
     let posts: Posts = index::read(fs::read_to_string(opt.index)?)?;
     trace!("{:#?}", posts);
@@ -125,6 +125,6 @@ pub fn run_output(cmd: &mut Command) -> Result<String, Error> {
     if output.status.success() {
         Ok(String::from_utf8_lossy(&output.stdout).into_owned())
     } else {
-        failure::bail!("failed to execute {:?}\nstatus: {}", cmd, output.status)
+        anyhow::bail!("failed to execute {:?}\nstatus: {}", cmd, output.status)
     }
 }
