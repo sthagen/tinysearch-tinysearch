@@ -1,41 +1,55 @@
-#[macro_use]
-extern crate lazy_static;
+use once_cell::sync::Lazy;
+use wasm_bindgen::prelude::*;
+use xorf::{HashProxy, Xor8};
 
 use std::cmp::Reverse;
-use std::error::Error;
+use std::collections::hash_map::DefaultHasher;
+
 use tinysearch_shared::{Filters, PostId, Score, Storage};
-use wasm_bindgen::prelude::*;
+pub type Filter = HashProxy<String, DefaultHasher, Xor8>;
 
 #[global_allocator]
 static ALLOC: wee_alloc::WeeAlloc = wee_alloc::WeeAlloc::INIT;
 
-fn load_filters() -> Result<Filters, Box<dyn Error>> {
+const TITLE_WEIGHT: usize = 3;
+
+static FILTERS: Lazy<Filters> = Lazy::new(|| {
     let bytes = include_bytes!("../storage");
-    Ok(Storage::from_bytes(bytes)?.filters)
+    Storage::from_bytes(bytes).unwrap().filters
+});
+
+// Wrapper around filter score, that also scores the post title
+// Post title score has a higher weight than post body
+fn score(title: &String, search_terms: &Vec<String>, filter: &Filter) -> usize {
+    let title_terms: Vec<String> = tokenize(&title);
+    let title_score: usize = search_terms
+        .iter()
+        .filter(|term| title_terms.contains(&term))
+        .count();
+    TITLE_WEIGHT * title_score + filter.score(search_terms)
 }
 
-lazy_static! {
-    static ref FILTERS: Filters = load_filters().unwrap();
+fn tokenize(s: &str) -> Vec<String> {
+    s.to_lowercase()
+        .split_whitespace()
+        .filter(|&t| !t.trim().is_empty())
+        .map(String::from)
+        .collect()
 }
 
 #[wasm_bindgen]
 pub fn search(query: String, num_results: usize) -> JsValue {
-    let lowercase_query = query.to_lowercase();
-    let search_terms: Vec<&str> = lowercase_query.split_whitespace().collect();
+    let search_terms: Vec<String> = tokenize(&query);
 
-    let mut matches: Vec<(&PostId, u32)> = FILTERS
+    let mut matches: Vec<(&PostId, usize)> = FILTERS
         .iter()
-        .map(|(name, filter)| (name, filter.score(&search_terms)))
-        .filter(|(_, score)| *score > 0)
+        .map(|(post_id, filter)| (post_id, score(&post_id.0, &search_terms, &filter)))
+        .filter(|(_post_id, score)| *score > 0)
         .collect();
 
     matches.sort_by_key(|k| Reverse(k.1));
 
-    let results: Vec<&PostId> = matches
-        .iter()
-        .map(|(name, _)| name.to_owned())
-        .take(num_results)
-        .collect();
+    let results: Vec<&PostId> = matches.into_iter().take(num_results).map(|p| p.0).collect();
 
     JsValue::from_serde(&results).unwrap()
 }

@@ -3,11 +3,9 @@ extern crate log;
 
 mod index;
 mod storage;
-mod strip_markdown;
 
 use anyhow::{Context, Error, Result};
 use argh::FromArgs;
-use lazy_static::lazy_static;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -17,20 +15,21 @@ use tempfile::tempdir;
 use fs::File;
 use index::Posts;
 
+// The search engine code gets statically included into the binary.
+// During indexation (when running tinysearch), this will be compiled to WASM.
 include!(concat!(env!("OUT_DIR"), "/engine.rs"));
 
-lazy_static! {
-    static ref DEMO_HTML: &'static [u8] = include_bytes!("../assets/demo.html");
-}
+// Include a bare-bones HTML page that demonstrates how tinysearch is used
+static DEMO_HTML: &str = include_str!("../assets/demo.html");
 
 #[derive(FromArgs)]
-/// Tiny Search
+/// A tiny, static search engine for static websites
 struct Opt {
     /// index JSON file to process
     #[argh(positional)]
     index: PathBuf,
 
-    /// output path for WASM module
+    /// output path for WASM module (local directory by default)
     #[argh(option, short = 'p', long = "path")]
     out_path: Option<PathBuf>,
 
@@ -39,7 +38,7 @@ struct Opt {
     optimize: bool,
 }
 
-fn extract_engine(temp_dir: &Path) -> Result<(), Error> {
+fn unpack_engine(temp_dir: &Path) -> Result<(), Error> {
     for file in FILES.file_names() {
         // This hack removes the "../" prefix that
         // gets introduced by including the crates
@@ -62,15 +61,18 @@ fn main() -> Result<(), Error> {
     FILES.set_passthrough(env::var_os("PASSTHROUGH").is_some());
 
     let opt: Opt = argh::from_env();
-    let out_path = PathBuf::from(opt.out_path.unwrap_or(PathBuf::from("."))).canonicalize()?;
+    let out_path = opt
+        .out_path
+        .unwrap_or_else(|| PathBuf::from("."))
+        .canonicalize()?;
 
     let posts: Posts = index::read(fs::read_to_string(opt.index)?)?;
-    trace!("{:#?}", posts);
-    storage::gen(posts)?;
+    trace!("Generating storage from posts: {:#?}", posts);
+    storage::write(posts)?;
 
     let temp_dir = tempdir()?;
-    println!("Extracting tinysearch WASM engine");
-    extract_engine(&temp_dir.path())?;
+    println!("Unpacking tinysearch WASM engine into temporary directory");
+    unpack_engine(temp_dir.path())?;
     debug!("Crate content extracted to {:?}/", &temp_dir);
 
     println!("Copying index into crate");
@@ -83,14 +85,14 @@ fn main() -> Result<(), Error> {
         optimize(&out_path)?;
     }
 
-    fs::write("demo.html", String::from_utf8_lossy(&DEMO_HTML).to_string())?;
+    fs::write(&out_path.join("demo.html"), DEMO_HTML)?;
 
-    println!("All done. Open the output folder with a web server to try a demo.");
+    println!("All done! Open the output folder with a web server to try the demo.");
     Ok(())
 }
 
-fn wasm_pack(in_dir: &Path, out_dir: &PathBuf) -> Result<String, Error> {
-    Ok(run_output(
+fn wasm_pack(in_dir: &Path, out_dir: &Path) -> Result<String, Error> {
+    run_output(
         Command::new("wasm-pack")
             .arg("build")
             .arg(in_dir)
@@ -99,18 +101,18 @@ fn wasm_pack(in_dir: &Path, out_dir: &PathBuf) -> Result<String, Error> {
             .arg("--release")
             .arg("--out-dir")
             .arg(out_dir),
-    )?)
+    )
 }
 
-fn optimize(dir: &PathBuf) -> Result<String, Error> {
-    Ok(run_output(
+fn optimize(dir: &Path) -> Result<String, Error> {
+    run_output(
         Command::new("wasm-opt")
             .current_dir(dir)
             .arg("-Oz")
             .arg("-o")
             .arg("tinysearch_engine_bg.wasm")
             .arg("tinysearch_engine_bg.wasm"),
-    )?)
+    )
 }
 
 pub fn run_output(cmd: &mut Command) -> Result<String, Error> {
@@ -118,10 +120,10 @@ pub fn run_output(cmd: &mut Command) -> Result<String, Error> {
     let output = cmd
         .stderr(Stdio::inherit())
         .output()
-        .context(format!("failed to run {:?}", cmd))?;
-    if output.status.success() {
-        Ok(String::from_utf8_lossy(&output.stdout).into_owned())
-    } else {
+        .with_context(|| format!("failed to run {:?}", cmd))?;
+
+    if !output.status.success() {
         anyhow::bail!("failed to execute {:?}\nstatus: {}", cmd, output.status)
     }
+    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
 }
