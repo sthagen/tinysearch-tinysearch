@@ -25,9 +25,13 @@ static DEMO_HTML: &str = include_str!("../assets/demo.html");
 #[derive(FromArgs)]
 /// A tiny, static search engine for static websites
 struct Opt {
+    /// show version and exit
+    #[argh(switch)]
+    version: bool,
+
     /// index JSON file to process
     #[argh(positional)]
-    index: PathBuf,
+    index: Option<PathBuf>,
 
     /// output path for WASM module (local directory by default)
     #[argh(option, short = 'p', long = "path")]
@@ -39,7 +43,9 @@ struct Opt {
 }
 
 fn unpack_engine(temp_dir: &Path) -> Result<(), Error> {
+    println!("Start unpack");
     for file in FILES.file_names() {
+        println!("Copying {:?}", file);
         // This hack removes the "../" prefix that
         // gets introduced by including the crates
         // from the `bin` parent directory.
@@ -49,7 +55,6 @@ fn unpack_engine(temp_dir: &Path) -> Result<(), Error> {
             debug!("Creating parent dir {:?}", &parent);
             fs::create_dir_all(&parent)?;
         }
-        debug!("Extracting {:?}", &outpath);
         let content = FILES.get(file)?;
         let mut outfile = File::create(&outpath)?;
         outfile.write_all(&content)?;
@@ -61,17 +66,27 @@ fn main() -> Result<(), Error> {
     FILES.set_passthrough(env::var_os("PASSTHROUGH").is_some());
 
     let opt: Opt = argh::from_env();
+
+    if opt.version {
+        println!("tinysearch {}", env!("CARGO_PKG_VERSION"));
+        std::process::exit(0);
+    }
+
     let out_path = opt
         .out_path
         .unwrap_or_else(|| PathBuf::from("."))
         .canonicalize()?;
 
-    let posts: Posts = index::read(fs::read_to_string(opt.index)?)?;
+    let index = opt.index.context("No index file specified")?;
+    let posts: Posts = index::read(fs::read_to_string(index)?)?;
     trace!("Generating storage from posts: {:#?}", posts);
     storage::write(posts)?;
 
     let temp_dir = tempdir()?;
-    println!("Unpacking tinysearch WASM engine into temporary directory");
+    println!(
+        "Unpacking tinysearch WASM engine into temporary directory {:?}",
+        temp_dir.path()
+    );
     unpack_engine(temp_dir.path())?;
     debug!("Crate content extracted to {:?}/", &temp_dir);
 
