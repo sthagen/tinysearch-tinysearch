@@ -7,33 +7,29 @@ help: ## This help message
 
 .PHONY: lint
 lint: ### Lint project using clippy
-	cargo clippy
+	cargo clippy --all-targets --all-features -- -D warnings
 
 .PHONY: clean
 clean: ### Clean up build artifacts
 	cargo clean
+	rm -rf wasm_output 
 
 .PHONY: build
 build: ### Compile project
-	cargo build
+	cargo build --features=bin
+
+.PHONY: build-docker
+build-docker: ### Build Docker image
+	docker build --progress=plain -t tinysearch/cli .
 
 .PHONY: install
 install: ## Install tinysearch
-	cargo install --force --path bin 
+	cargo install --force --path . --features=bin
 
 .PHONY: test
 test: ## Run unit tests
-	cargo test
+	cargo test --features=bin
 
 .PHONY: run
 run: ## Run tinysearch with sample input
-	cargo run -- fixtures/index.json
-
-.PHONY: pack
-pack: ## Pack tinysearch node module
-	wasm-pack build bin
-	wasm-pack pack
-
-.PHONY: publish
-publish: pack ## Publish tinysearch to NPM
-	wasm-pack publish
+	cargo run --features="bin" -- fixtures/index.json
